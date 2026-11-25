@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="de-CH">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Ordasio ist umgezogen</title>
+<style>
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:#F4FAF6;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:#0A1F17;padding:20px;box-sizing:border-box}
+  .k{max-width:420px;background:#fff;border-radius:22px;padding:28px 24px;box-shadow:0 20px 50px -30px rgba(10,31,23,.45);text-align:center}
+  h1{font-size:1.35rem;margin:0 0 8px}p{margin:0 0 14px;color:#3F5A4F}
+  b.adr{color:#0E7A55}
+  button,a.b{display:block;width:100%;box-sizing:border-box;border:0;border-radius:100px;padding:13px 18px;font:600 15px/1.2 inherit;font-family:inherit;cursor:pointer;margin-top:10px;text-decoration:none}
+  .haupt{background:#0B3B2E;color:#fff}.leise{background:#E8F4EE;color:#0B3B2E}
+  small{display:block;margin-top:12px;color:#5B6F66}
+</style>
+</head>
+<body>
+<div class="k" id="k" hidden>
+  <h1>Ordasio hat eine neue Adresse</h1>
+  <p>Ab jetzt finden Sie Ordasio unter <b class="adr">app.ordasio.ch</b>.<br>Ihre Daten auf diesem Gerät nehmen wir mit.</p>
+  <button class="haupt" id="los">Weiter zu app.ordasio.ch</button>
+  <a class="b leise" id="ohne" href="#">Ohne Gerätedaten weiter</a>
+  <small id="info">Es öffnet sich ein neues Fenster. Danach können Sie dieses schliessen.</small>
+</div>
+<script>
+(async function () {
+  var ZIEL = 'https://app.ordasio.ch';
+  var weg = location.pathname + location.search + location.hash;
+  var ganz = ZIEL + weg;
+  var gehe = function () { location.replace(ganz); };
+  // Seiten für Kunden und Mitarbeitende (Rechnungs-, Portal-, Buchungs-, Bewerbungs- und Handy-Links): sofort weiter
+  if (/^\/(r|p|b|buchen|zeit\/erfassen)(\/|$)/.test(location.pathname)) return gehe();
+  var erledigt = false; try { erledigt = !!localStorage.getItem('ordasio.umgezogen'); } catch (e) {}
+  var dbs = []; try { dbs = indexedDB.databases ? (await indexedDB.databases()).filter(function (d) { return d.name; }) : []; } catch (e) {}
+  var lsKeys = []; try { lsKeys = Object.keys(localStorage); } catch (e) {}
+  if (erledigt || (!dbs.length && !lsKeys.length)) return gehe();
+  document.getElementById('k').hidden = false;
+  document.getElementById('ohne').onclick = function (e) { e.preventDefault(); try { localStorage.setItem('ordasio.umgezogen', '1'); } catch (x) {} gehe(); };
+
+  // Alles einsammeln, was dieser Browser für app.nasuvia.ch gespeichert hat
+  function dbLesen(name) {
+    return new Promise(function (ok) {
+      var r = indexedDB.open(name);
+      r.onerror = function () { ok(null); };
+      r.onsuccess = function () {
+        var db = r.result, stores = [].slice.call(db.objectStoreNames), aus = { name: name, version: db.version, stores: [] };
+        if (!stores.length) { db.close(); return ok(aus); }
+        var t = db.transaction(stores, 'readonly'), offen = stores.length;
+        stores.forEach(function (s) {
+          var os = t.objectStore(s), eintrag = { name: s, keyPath: os.keyPath, autoIncrement: os.autoIncrement, indexe: [].slice.call(os.indexNames).map(function (i) { var x = os.index(i); return { name: i, keyPath: x.keyPath, unique: x.unique, multiEntry: x.multiEntry }; }), werte: [], schluessel: [] };
+          aus.stores.push(eintrag);
+          os.getAll().onsuccess = function (e) { eintrag.werte = e.target.result; os.getAllKeys().onsuccess = function (k) { eintrag.schluessel = k.target.result; if (--offen === 0) { db.close(); ok(aus); } }; };
+        });
+        t.onerror = function () { db.close(); ok(aus); };
+      };
+    });
+  }
+  var paket = null;
+  async function sammeln() {
+    if (paket) return paket;
+    var ls = {}; lsKeys.forEach(function (k) { if (k !== 'ordasio.umgezogen') ls[k] = localStorage.getItem(k); });
+    var dumps = []; for (var i = 0; i < dbs.length; i++) { var d = await dbLesen(dbs[i].name); if (d) dumps.push(d); }
+    return (paket = { typ: 'ordasio-umzug', ls: ls, dbs: dumps });
+  }
+  var fenster = null;
+  window.addEventListener('message', async function (e) {
+    if (e.origin !== ZIEL || !e.data) return;
+    if (e.data.typ === 'umzug-bereit' && fenster) fenster.postMessage(await sammeln(), ZIEL);
+    if (e.data.typ === 'umzug-fertig') {
+      try { localStorage.setItem('ordasio.umgezogen', '1'); } catch (x) {}
+      document.getElementById('info').textContent = '✓ Übernommen. Sie können dieses Fenster schliessen.';
+      setTimeout(gehe, 1200);
+    }
+  });
+  document.getElementById('los').onclick = function () {
+    sammeln();
+    fenster = window.open(ZIEL + '/umzug/?ziel=' + encodeURIComponent(weg), '_blank');
+    if (!fenster) { document.getElementById('info').textContent = 'Das neue Fenster wurde blockiert. Bitte Pop-ups erlauben oder «Ohne Gerätedaten weiter» wählen.'; }
+  };
+})();
+</script>
+</body>
+</html>
